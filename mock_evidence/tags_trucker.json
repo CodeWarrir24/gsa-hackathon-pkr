@@ -1,0 +1,6 @@
+{
+  "target_soc": "53-3032",
+  "detected_objects": ["semi-truck", "heavy shipping pallet", "concrete loading dock", "ladder", "climbing harness"],
+  "scene_text_ocr": "Warning: High Velocity Automated Conveyor Sorting Line Alpha"
+}
+

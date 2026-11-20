@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Secrets — NEVER commit
+.env
+.env.*
+*.key
+*.pem
+
+# LaborDNA generated files — rebuild locally
+tools/gsa_pkr_toolkit/docs/ors_index.faiss
+tools/gsa_pkr_toolkit/docs/ors_chunks.json
+tools/gsa_pkr_toolkit/docs/ors_collection_manual.pdf
+
+# Editor / OS artifacts
+.env.swp
+=1.3.0
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
