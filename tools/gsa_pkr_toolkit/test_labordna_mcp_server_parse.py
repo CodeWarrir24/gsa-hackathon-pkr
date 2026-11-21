@@ -226,6 +226,68 @@ def test_parse_fe_shorthand_notes() -> None:
     check("Combined max_lifting_lbs=15", result["max_lifting_lbs"] == 15, str(result))
     check("Combined svp_level=7",        result["svp_level"] == 7,        str(result))
 
+    # --- New ORS boolean fields ---
+    result = parse("Worker performs pre-trip inspection outdoors")
+    check("'pre-trip inspection' → outdoors=True", result["outdoors"] is True, str(result))
+
+    result = parse("Driver does fueling and coupling of trailers in the yard")
+    check("'fueling' → outdoors=True",   result["outdoors"] is True,   str(result))
+    check("'coupling' → pushing_pulling=True", result["pushing_pulling"] is True, str(result))
+
+    result = parse("Snow chains required on Alaska route. CDL required.")
+    check("'snow chains' → outdoors=True", result["outdoors"] is True, str(result))
+
+    result = parse("Worker operates heavy truck on long-haul routes")
+    check("'heavy truck' → vibration=True",   result["vibration"] is True, str(result))
+    check("'long-haul' → vibration=True",     result["vibration"] is True, str(result))
+
+    result = parse("Worker climbs ladder to access roof storage area")
+    check("'climbs ladder' → climbing=True", result["climbing"] is True, str(result))
+
+    result = parse("Worker pulls cart to retrieve documents from filing room")
+    check("'pulls cart' → pushing_pulling=True", result["pushing_pulling"] is True, str(result))
+
+    result = parse("Employee works in walk-in freezer for cold storage")
+    check("'walk-in freezer' → extreme_cold=True", result["extreme_cold"] is True, str(result))
+
+    result = parse("Furnace operator in extreme heat environment")
+    check("'furnace' → extreme_heat=True", result["extreme_heat"] is True, str(result))
+
+    # Boolean fields default to False when not mentioned
+    result = parse("S:95% desk job, L:10#")
+    check("No outdoor keywords → outdoors=False",         result["outdoors"] is False,         str(result))
+    check("No vibration keywords → vibration=False",      result["vibration"] is False,         str(result))
+    check("No climbing keywords → climbing=False",        result["climbing"] is False,          str(result))
+    check("No cold keywords → extreme_cold=False",        result["extreme_cold"] is False,      str(result))
+    check("No heat keywords → extreme_heat=False",        result["extreme_heat"] is False,      str(result))
+    check("No push/pull keywords → pushing_pulling=False", result["pushing_pulling"] is False,  str(result))
+
+    # Full clerk test case — clean pass
+    clerk_note = (
+        "Observed CSR desk workspace. S:95% max. L:10# cap. Requires 4-yr bachelor degree. "
+        "Worker performs data entry at computer workstation all day. Uses keyboard and mouse "
+        "constantly. Occasionally pulls filing cart to retrieve physical documents."
+    )
+    result = parse(clerk_note)
+    check("Clerk: sitting_pct=95.0",       result["sitting_pct"] == 95.0,      str(result))
+    check("Clerk: max_lifting_lbs=10",     result["max_lifting_lbs"] == 10,     str(result))
+    check("Clerk: svp_level=7",            result["svp_level"] == 7,            str(result))
+    check("Clerk: outdoors=False",         result["outdoors"] is False,         str(result))
+    check("Clerk: pushing_pulling=True",   result["pushing_pulling"] is True,   str(result))
+    check("Clerk: vibration=False",        result["vibration"] is False,        str(result))
+    check("Clerk: extreme_cold=False",     result["extreme_cold"] is False,     str(result))
+
+    # Full trucker test case — outdoors + vibration detected
+    trucker_note = (
+        "Driver does pre-trip inspection, fueling, coupling trailers, carries snow chains "
+        "for Alaska route. Long-haul heavy truck. CDL required."
+    )
+    result = parse(trucker_note)
+    check("Trucker: outdoors=True",        result["outdoors"] is True,          str(result))
+    check("Trucker: vibration=True",       result["vibration"] is True,         str(result))
+    check("Trucker: pushing_pulling=True", result["pushing_pulling"] is True,   str(result))
+    check("Trucker: extreme_cold=False",   result["extreme_cold"] is False,     str(result))
+
 
 # ---------------------------------------------------------------------------
 # 3. evaluate_visual_evidence_tags
@@ -309,34 +371,77 @@ def test_evaluate_visual_evidence_tags() -> None:
 def test_execute_cross_survey_collision_audit() -> None:
     print("\n[4] execute_cross_survey_collision_audit")
 
-    # No collision: low sitting, no extreme weather
-    result = execute_cross_survey_collision_audit("11-1011", 40.0, False)
-    check("Low sitting + no weather → is_valid=True", result["is_valid"] is True, str(result))
-    check("Low sitting + no weather → no alerts",     result["alerts"] == [],      str(result))
+    # Clean pass: low sitting, no environmental flags, unknown SOC
+    result = execute_cross_survey_collision_audit("11-1011", 40.0)
+    check("Low sitting + no flags → is_valid=True", result["is_valid"] is True, str(result))
+    check("Low sitting + no flags → no alerts",     result["alerts"] == [],      str(result))
 
-    # No collision: high sitting but no extreme weather
-    result = execute_cross_survey_collision_audit("11-1011", 90.0, False)
-    check("High sitting + no weather → is_valid=True", result["is_valid"] is True, str(result))
+    # No collision: high sitting but no environmental flags
+    result = execute_cross_survey_collision_audit("11-1011", 90.0)
+    check("High sitting + no env flags → is_valid=True", result["is_valid"] is True, str(result))
 
-    # Boundary: sitting exactly 80.0 with extreme weather — NOT > 80 so no collision
-    result = execute_cross_survey_collision_audit("11-1011", 80.0, True)
-    check("sitting=80.0 (not >80) + weather → is_valid=True", result["is_valid"] is True, str(result))
-
-    # CRITICAL COLLISION: sitting > 80 AND extreme weather, no CSV → UNKNOWN_SERIES
-    result = execute_cross_survey_collision_audit("99-9999", 85.0, True)
-    check("High sitting + extreme weather → is_valid=False", result["is_valid"] is False, str(result))
-    check("Exactly 1 alert produced",      len(result["alerts"]) == 1, str(result))
-    check("severity=CRITICAL_COLLISION",
-          result["alerts"][0]["severity"] == "CRITICAL_COLLISION", str(result))
-    check("Message contains measured pct",
-          "85.0%" in result["alerts"][0]["message"], result["alerts"][0]["message"])
+    # CRITICAL COLLISION: sitting > 80 AND outdoors, unknown SOC → UNKNOWN_SERIES
+    result = execute_cross_survey_collision_audit("99-9999", 85.0, outdoors=True)
+    check("High sitting + outdoors → is_valid=False", result["is_valid"] is False, str(result))
+    collisions = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("At least 1 CRITICAL_COLLISION alert",   len(collisions) >= 1, str(result))
+    check("Message contains measured pct '85.0%'",
+          "85.0%" in collisions[0]["message"], collisions[0]["message"])
     check("Message contains UNKNOWN_SERIES (no CSV)",
-          "UNKNOWN_SERIES" in result["alerts"][0]["message"], result["alerts"][0]["message"])
+          "UNKNOWN_SERIES" in collisions[0]["message"], collisions[0]["message"])
+
+    # CRITICAL COLLISION via extreme_cold flag
+    result = execute_cross_survey_collision_audit("99-9999", 85.0, extreme_cold=True)
+    collisions = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("High sitting + extreme_cold → collision", len(collisions) >= 1, str(result))
+
+    # CRITICAL COLLISION via extreme_heat flag
+    result = execute_cross_survey_collision_audit("99-9999", 85.0, extreme_heat=True)
+    collisions = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("High sitting + extreme_heat → collision", len(collisions) >= 1, str(result))
+
+    # --- Trucker advisories ---
+    # Trucker with outdoors=False → Outdoors + Vibration advisories
+    result = execute_cross_survey_collision_audit("53-3032", 90.0, outdoors=False, vibration=False)
+    advisories = [a for a in result["alerts"] if a["severity"] == "ADVISORY"]
+    check("Trucker outdoors=False → Outdoors advisory",
+          any("Outdoors Advisory" in a["message"] for a in advisories), str(result))
+    check("Trucker vibration=False → Vibration advisory",
+          any("Vibration Advisory" in a["message"] for a in advisories), str(result))
+
+    # Trucker with outdoors=True, vibration=True → no advisories, but collision on high sitting
+    result = execute_cross_survey_collision_audit("53-3032", 90.0, outdoors=True, vibration=True)
+    advisories = [a for a in result["alerts"] if a["severity"] == "ADVISORY"]
+    collisions  = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("Trucker outdoors+vibration flagged → no advisories", len(advisories) == 0, str(result))
+    check("Trucker sitting=90% + outdoors → collision",         len(collisions) >= 1, str(result))
+
+    # Trucker with low sitting + outdoors + vibration → clean pass
+    result = execute_cross_survey_collision_audit("53-3032", 40.0, outdoors=True, vibration=True)
+    collisions = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("Trucker low sitting + env flags → no collision", len(collisions) == 0, str(result))
+
+    # --- Clerk test cases ---
+    # Clerk clean pass: high sitting, no environmental flags
+    result = execute_cross_survey_collision_audit("43-4051", 95.0)
+    advisories = [a for a in result["alerts"] if a["severity"] == "ADVISORY"]
+    collisions  = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("Clerk sitting=95% + no env → no advisories",  len(advisories) == 0, str(result))
+    check("Clerk sitting=95% + no env → no collision",   len(collisions) == 0,  str(result))
+
+    # Clerk collision: outdoor kiosk scenario
+    result = execute_cross_survey_collision_audit("43-4051", 95.0, outdoors=True)
+    collisions = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("Clerk sitting=95% + outdoors → collision (exceeds 81.2% ceiling)",
+          len(collisions) >= 1, str(result))
+    check("Clerk collision message contains '95.0%'",
+          "95.0%" in collisions[0]["message"], collisions[0]["message"])
 
     # CSV lookup: create a minimal crosswalk and confirm series label appears in alert
     csv_content = (
-        "soc_code,official_title,sitting_series_id,sitting_source_value\n"
-        "11-1011,Chief Executives,SED-01,92.0\n"
+        "soc_code,official_title,bls_occupation_key,sitting_series_id,sitting_source_value,"
+        "fine_manip_series_id,fine_manip_frequently_pct,naics_code\n"
+        "11-1011,Chief Executives,00A,SED-01,0.5,,0.0,000000\n"
     )
     orig_dir = os.getcwd()
     with tempfile.TemporaryDirectory() as tmp:
@@ -345,14 +450,13 @@ def test_execute_cross_survey_collision_audit() -> None:
             f.write(csv_content)
         os.chdir(tmp)
         try:
-            result = execute_cross_survey_collision_audit("11-1011", 85.0, True)
+            result = execute_cross_survey_collision_audit("11-1011", 99.0, outdoors=True)
         finally:
             os.chdir(orig_dir)
-
-    check("CSV hit → is_valid=False",
-          result["is_valid"] is False, str(result))
+    collisions = [a for a in result["alerts"] if a["severity"] == "CRITICAL_COLLISION"]
+    check("CSV hit → collision alert produced",          len(collisions) >= 1, str(result))
     check("CSV hit → alert uses series label 'SED-01'",
-          "SED-01" in result["alerts"][0]["message"], result["alerts"][0]["message"])
+          "SED-01" in collisions[0]["message"], collisions[0]["message"])
 
 
 # ---------------------------------------------------------------------------
